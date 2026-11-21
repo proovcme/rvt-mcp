@@ -56,7 +56,8 @@ namespace RvtMcp.Server
                 {
                     if (!ScriptSubmissionStore.TryReserve(operationId))
                         return ScriptSubmissionResult(operationId, "REVIT_REQUEST_ALREADY_SUBMITTED",
-                            "Query revit_get_operation_status for the original operation. This call was not dispatched.");
+                            "Query revit_get_operation_status for the original operation. This call was not dispatched.",
+                            ScriptSubmissionStore.WasNotStarted(operationId) ? GatewayPendingRequest.NotStarted(operationId) : null);
                 }
                 catch (Exception ex) when (ex is System.IO.IOException || ex is UnauthorizedAccessException)
                 {
@@ -102,7 +103,9 @@ namespace RvtMcp.Server
             }
             catch (TargetException ex) when (!ex.Payload.Sent && ex.Operation == null)
             {
-                throw new TargetException(ex.Payload, GatewayPendingRequest.NotStarted(operationId));
+                var receipt = GatewayPendingRequest.NotStarted(operationId);
+                if (command == "send_code_to_revit") ScriptSubmissionStore.RecordNotStarted(operationId, receipt);
+                throw new TargetException(ex.Payload, receipt);
             }
 
             var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -186,12 +189,12 @@ namespace RvtMcp.Server
             catch (Exception ex) { return $"Error: {ex.Message}"; }
         }
 
-        private static JObject ScriptSubmissionResult(string operationId, string error, string note) => new JObject
+        private static JObject ScriptSubmissionResult(string operationId, string error, string note, JObject receipt = null) => new JObject
         {
             ["success"] = false,
             ["error"] = error,
             ["message"] = note,
-            ["_operation"] = new JObject { ["operationId"] = operationId, ["execution"] = "submission_unconfirmed",
+            ["_operation"] = receipt ?? new JObject { ["operationId"] = operationId, ["execution"] = "submission_unconfirmed",
                 ["outcome"] = "unknown", ["complete"] = false, ["mutationApplied"] = JValue.CreateNull(), ["nextStep"] = note }
         };
 

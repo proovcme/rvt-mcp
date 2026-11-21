@@ -646,6 +646,7 @@ namespace RvtMcp.Server
             TargetCallContext callCtx, bool requireWriteCapabilities, ScriptRuntimeMetadata script)
         {
             var binding = RevitTargetBinding.Binding;
+            var persistScriptOutcome = command == "send_code_to_revit";
             for (var attempt = 0; ; attempt++)
             {
                 var requestObject = JObject.FromObject(new
@@ -723,7 +724,8 @@ namespace RvtMcp.Server
                             {
                                 var notStarted = GatewayPendingRequest.NotStarted(operationId);
                                 if (blocking != null) notStarted["blockedBy"] = blocking.BlockedBy();
-                                pending = new GatewayPendingRequest(operationId, conn.Epoch, script: scriptReceipt);
+                                pending = new GatewayPendingRequest(operationId, conn.Epoch, script: scriptReceipt,
+                                    persistScriptOutcome: persistScriptOutcome);
                                 var rejected = new JObject { ["success"] = false, ["error"] = rejection, ["_operation"] = notStarted };
                                 if (script != null) rejected["data"] = new JObject { ["sent"] = false, ["executed"] = false };
                                 pending.Route(rejected);
@@ -733,7 +735,7 @@ namespace RvtMcp.Server
                                 script == null ? null : final => {
                                     if (UsageLogger?.RecordScriptCall(final) == false)
                                         final["_script"]["telemetry_status"] = "write_failed";
-                                });
+                                }, persistScriptOutcome: persistScriptOutcome);
                             _pending[id] = pending;
                             // From here a write may partially reach Revit. Never replay a next declaration.
                             if (declared != null) DialogAnswers.Sending();

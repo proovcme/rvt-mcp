@@ -992,6 +992,48 @@ namespace RvtMcp.Tests
             });
         }
 
+        [Theory]
+        [InlineData(true)]
+        [InlineData(false)]
+        public async Task Script_timeout_before_start_keeps_its_terminal_receipt_without_gateway_memory(bool clientSuppliedId)
+        {
+            using var wire = new WireHost();
+            Descriptor(wire.Port);
+            wire.OnCommand = (request, host) => host.Send(new JObject
+            {
+                ["id"] = request["id"], ["success"] = false, ["error"] = "REVIT_REQUEST_NOT_STARTED",
+                ["_operation"] = GatewayPendingRequest.NotStarted(request.Value<string>("operation_id"))
+            });
+            var args = new Dictionary<string, object> { ["code"] = "return 7;", ["timeout_seconds"] = 1 };
+            if (clientSuppliedId) args["request_id"] = Guid.NewGuid().ToString("N");
+
+            await WithMcp(async (client, ct) =>
+            {
+                var first = Text(await client.CallToolAsync("revit_send_code_to_revit", args, cancellationToken: ct));
+                Assert.Equal("REVIT_REQUEST_NOT_STARTED", first["error"]);
+                var id = first["_operation"].Value<string>("operationId");
+                Assert.Null(_ledger.GetOperation(id));
+                ToolGateway.PreviousOperations.Clear();
+
+                var status = Text(await client.CallToolAsync("revit_get_operation_status",
+                    new Dictionary<string, object> { ["operationId"] = id.ToUpperInvariant(), ["waitSeconds"] = 1 }, cancellationToken: ct));
+                Assert.True(status.Value<bool>("available"));
+                Assert.True(status.Value<bool>("complete"));
+                Assert.False(status.Value<bool>("mutationApplied"));
+                Assert.Equal(id, status["operationId"]);
+                Assert.Equal("gateway_receipt", status["source"]);
+                Assert.Equal("completed", status["execution"]);
+                Assert.Equal("not_started", status["outcome"]);
+                Assert.Null(status["stillWaiting"]);
+
+                args["request_id"] = id;
+                var repeat = Text(await client.CallToolAsync("revit_send_code_to_revit", args, cancellationToken: ct));
+                Assert.Equal("REVIT_REQUEST_ALREADY_SUBMITTED", repeat["error"]);
+                Assert.Equal("not_started", repeat["_operation"]["outcome"]);
+                Assert.Single(wire.Requests);
+            });
+        }
+
         [Fact]
         public async Task Script_request_id_is_reserved_by_at_most_one_concurrent_submitter()
         {

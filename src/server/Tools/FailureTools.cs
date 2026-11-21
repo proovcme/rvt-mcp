@@ -137,6 +137,13 @@ namespace RvtMcp.Server
             var operation = StoreFactory().GetOperation(operationId);
             if (operation == null)
             {
+                if (ScriptSubmissionStore.WasNotStarted(operationId))
+                {
+                    var receipt = GatewayPendingRequest.NotStarted(operationId);
+                    receipt["available"] = true;
+                    receipt["source"] = "gateway_receipt";
+                    return receipt;
+                }
                 // Reads have no durable native record. A keyed script may have only its submission reservation so far.
                 if (ToolGateway.PreviousOperations.Status(operationId) is JObject session)
                     return MarkReadIfCompleted(operationId, session);

@@ -36,8 +36,9 @@ namespace RvtMcp.Server
         private bool _finished;
         private readonly JObject _script;
         private readonly Action<JObject> _finalizeScript;
+        private readonly bool _persistScriptOutcome;
         internal GatewayPendingRequest(string operationId, long connectionId, RvtMcp.Plugin.ChangeHistoryRequest history = null,
-            JObject script = null, Action<JObject> finalizeScript = null)
+            JObject script = null, Action<JObject> finalizeScript = null, bool persistScriptOutcome = false)
         {
             OperationId = operationId;
             ConnectionId = connectionId;
@@ -45,6 +46,7 @@ namespace RvtMcp.Server
             _historyLease = history == null ? null : new Memory.HistoryCallLease(history.Id);
             _script = script == null ? null : (JObject)script.DeepClone();
             _finalizeScript = finalizeScript;
+            _persistScriptOutcome = persistScriptOutcome;
         }
 
         // Event routing precedes final handling. An event can return to the caller but never finishes execution.
@@ -98,6 +100,8 @@ namespace RvtMcp.Server
                 }
                 _waitingForUser = false;
                 _finished = true;
+                if (_persistScriptOutcome && frame.Value<bool?>("success") == false)
+                    ScriptSubmissionStore.RecordNotStarted(OperationId, frame["_operation"] as JObject);
                 if (_script != null)
                 {
                     if (frame["_script"] == null) ScriptTelemetry.AttachPending(frame, _script);
