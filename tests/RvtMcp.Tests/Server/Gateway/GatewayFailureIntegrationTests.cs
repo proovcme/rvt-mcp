@@ -955,20 +955,26 @@ namespace RvtMcp.Tests
             finally { TargetCallContext.End(context); }
         }
 
-        [Fact]
-        public async Task Script_request_id_blocks_in_flight_and_post_restart_submission()
+        [Theory]
+        [InlineData(true)]
+        [InlineData(false)]
+        public async Task Script_operation_id_blocks_in_flight_and_post_restart_submission(bool clientSuppliedId)
         {
             using var wire = new WireHost();
             Descriptor(wire.Port);
             var arrived = new TaskCompletionSource<JObject>(TaskCreationOptions.RunContinuationsAsynchronously);
             wire.OnCommand = (request, _) => arrived.TrySetResult(request);
-            var id = Guid.NewGuid().ToString("N");
-            var args = new Dictionary<string, object> { ["code"] = "return 7;", ["request_id"] = id };
+            var suppliedId = clientSuppliedId ? Guid.NewGuid().ToString("N") : null;
+            var args = new Dictionary<string, object> { ["code"] = "return 7;" };
+            if (suppliedId != null) args["request_id"] = suppliedId;
             await WithMcp(async (client, ct) =>
             {
                 var first = client.CallToolAsync("revit_send_code_to_revit", args, cancellationToken: ct).AsTask();
                 var request = await arrived.Task.WaitAsync(TimeSpan.FromSeconds(8), ct);
-                Assert.Equal(id, request.Value<string>("operation_id"));
+                var id = request.Value<string>("operation_id");
+                Assert.True(Guid.TryParseExact(id, "N", out _));
+                if (suppliedId != null) Assert.Equal(suppliedId, id);
+                args["request_id"] = id;
                 var unconfirmed = JObject.Parse(await FailureTools.GetOperationStatus(id));
                 Assert.Equal("submission_unconfirmed", unconfirmed["execution"]);
 
@@ -990,6 +996,51 @@ namespace RvtMcp.Tests
                 Assert.Equal(id, repeat["_operation"]["operationId"]);
                 Assert.Single(wire.Requests);
             });
+        }
+
+        [Theory]
+        [InlineData(true)]
+        [InlineData(false)]
+        public async Task Script_cancelled_before_wire_write_has_a_durable_no_start_receipt(bool beforeConnection)
+        {
+            using var wire = new WireHost();
+            Descriptor(wire.Port);
+            using var cancellation = new CancellationTokenSource();
+            if (beforeConnection) cancellation.Cancel();
+            else ToolGateway.BeforeWriteForTests = cancellation.Cancel;
+            var operationId = Guid.NewGuid();
+            var context = TargetCallContext.Begin();
+            context.Cancellation = cancellation.Token;
+            try
+            {
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() => ToolGateway.SendToRevit("send_code_to_revit",
+                    new { code = "return 7;" }, scriptRequestId: operationId));
+            }
+            finally { TargetCallContext.End(context); }
+            ToolGateway.PreviousOperations.Clear();
+            Assert.Empty(wire.Requests);
+            Assert.True(ScriptSubmissionStore.IsReserved(operationId.ToString("N")));
+            var status = JObject.Parse(await FailureTools.GetOperationStatus(operationId.ToString("N")));
+            Assert.Equal("not_started", status["outcome"]);
+            Assert.Equal("gateway_receipt", status["source"]);
+            Assert.False(status.Value<bool>("mutationApplied"));
+        }
+
+        [Fact]
+        public async Task Sqlite_failure_does_not_hide_confirmed_no_start_or_invent_it_for_an_unconfirmed_reservation()
+        {
+            var confirmed = Guid.NewGuid().ToString("N");
+            var unconfirmed = Guid.NewGuid().ToString("N");
+            Assert.True(ScriptSubmissionStore.TryReserve(confirmed));
+            Assert.True(ScriptSubmissionStore.TryReserve(unconfirmed));
+            ScriptSubmissionStore.RecordNotStarted(confirmed, GatewayPendingRequest.NotStarted(confirmed));
+            FailureTools.StoreFactory = () => throw new Microsoft.Data.Sqlite.SqliteException("Fixture SQLite unavailable", 14);
+
+            var receipt = JObject.Parse(await FailureTools.GetOperationStatus(confirmed));
+            Assert.Equal("gateway_receipt", receipt["source"]);
+            Assert.Equal("not_started", receipt["outcome"]);
+            Assert.True(receipt.Value<bool>("complete"));
+            Assert.Contains("FAILURE_STORAGE_FAILED", await FailureTools.GetOperationStatus(unconfirmed));
         }
 
         [Theory]

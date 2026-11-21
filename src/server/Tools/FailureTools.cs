@@ -134,17 +134,14 @@ namespace RvtMcp.Server
         private static JObject ReadStatus(string operationId)
         {
             if (Guid.TryParseExact(operationId, "N", out var guid)) operationId = guid.ToString("N");
-            var operation = StoreFactory().GetOperation(operationId);
+            FailureOperation operation;
+            try { operation = StoreFactory().GetOperation(operationId); }
+            catch when (ScriptSubmissionStore.WasNotStarted(operationId)) { return GatewayNotStarted(operationId); }
             if (operation == null)
             {
                 if (ScriptSubmissionStore.WasNotStarted(operationId))
-                {
-                    var receipt = GatewayPendingRequest.NotStarted(operationId);
-                    receipt["available"] = true;
-                    receipt["source"] = "gateway_receipt";
-                    return receipt;
-                }
-                // Reads have no durable native record. A keyed script may have only its submission reservation so far.
+                    return GatewayNotStarted(operationId);
+                // Reads have no durable native record. A script may have only its submission reservation so far.
                 if (ToolGateway.PreviousOperations.Status(operationId) is JObject session)
                     return MarkReadIfCompleted(operationId, session);
                 if (ScriptSubmissionStore.IsReserved(operationId))
@@ -168,6 +165,14 @@ namespace RvtMcp.Server
             }
             result["available"] = true;
             return MarkReadIfCompleted(operationId, result);
+        }
+
+        private static JObject GatewayNotStarted(string operationId)
+        {
+            var receipt = GatewayPendingRequest.NotStarted(operationId);
+            receipt["available"] = true;
+            receipt["source"] = "gateway_receipt";
+            return MarkReadIfCompleted(operationId, receipt);
         }
 
         private static JObject MarkReadIfCompleted(string operationId, JObject status)

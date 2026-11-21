@@ -48,10 +48,11 @@ namespace RvtMcp.Server
             var config = ServerState.Config ?? new RvtMcpConfig();
             var rejection = ToolReadPolicy.Rejection(command, config.ReadOnlyOrDefault, config.EnableSendCodeOrDefault);
             if (rejection != null) throw new InvalidOperationException(rejection);
+            var isScript = command == "send_code_to_revit";
+            if (scriptRequestId.HasValue && !isScript) throw new ArgumentException("A script request ID is only valid for send_code_to_revit.");
             var operationId = (scriptRequestId ?? Guid.NewGuid()).ToString("N");
-            if (scriptRequestId.HasValue)
+            if (isScript)
             {
-                if (command != "send_code_to_revit") throw new ArgumentException("A script request ID is only valid for send_code_to_revit.");
                 try
                 {
                     if (!ScriptSubmissionStore.TryReserve(operationId))
@@ -81,8 +82,11 @@ namespace RvtMcp.Server
                 // it may reuse the existing binding only.
                 var snap = RevitTargetBinding.Snapshot();
                 if (snap.State == BindingState.None || snap.Record == null)
+                {
+                    if (isScript) ScriptSubmissionStore.RecordNotStarted(operationId, GatewayPendingRequest.NotStarted(operationId));
                     throw new InvalidOperationException(
                         "No Revit target is bound; this call did not come through an MCP tool request.");
+                }
                 pinned = snap.Generation;
             }
 
@@ -104,8 +108,15 @@ namespace RvtMcp.Server
             catch (TargetException ex) when (!ex.Payload.Sent && ex.Operation == null)
             {
                 var receipt = GatewayPendingRequest.NotStarted(operationId);
-                if (command == "send_code_to_revit") ScriptSubmissionStore.RecordNotStarted(operationId, receipt);
+                if (isScript) ScriptSubmissionStore.RecordNotStarted(operationId, receipt);
                 throw new TargetException(ex.Payload, receipt);
+            }
+            catch (OperationCanceledException) when (isScript && callCtx?.Cancellation.IsCancellationRequested == true)
+            {
+                // The connection/dispatch checks can cancel before the write. A failed wire write instead
+                // throws TARGET_INTERRUPTED, because some or all of the script may have reached Revit.
+                ScriptSubmissionStore.RecordNotStarted(operationId, GatewayPendingRequest.NotStarted(operationId));
+                throw;
             }
 
             var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -140,7 +151,7 @@ namespace RvtMcp.Server
             // Finished pending operations are attached by RuntimeToolFilter, to the response the agent receives.
             var execution = (response["_operation"] as JObject)?.Value<string>("execution");
             var unfinished = execution == "waiting_for_user" || execution == "timed_out_running" || execution == "running" || execution == "queued";
-            if (unfinished || scriptRequestId.HasValue)
+            if (unfinished || isScript)
             {
                 PreviousOperations.Remember(pending.OperationId, "revit_" + command, pending.Execution.Task,
                     execution ?? "running", ToolReadPolicy.IsReadOnly(command), pending);
