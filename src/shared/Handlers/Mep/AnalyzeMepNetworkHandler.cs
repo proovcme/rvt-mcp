@@ -32,7 +32,8 @@ namespace RvtMcp.Plugin.Handlers
   ""type"": ""object"",
   ""properties"": {
     ""system_id"": {""type"":""integer"",""description"":""MEP system ElementId. Either system_id or system_name required.""},
-    ""system_name"": {""type"":""string"",""description"":""MEP system name. Either system_id or system_name required.""}
+    ""system_name"": {""type"":""string"",""description"":""MEP system name. Either system_id or system_name required.""},
+    ""piping_role_parameter_guid"": {""type"":""string"",""description"":""Shared text parameter GUID for expected project piping role.""}
   }
 }";
 
@@ -56,6 +57,10 @@ namespace RvtMcp.Plugin.Handlers
 
             var systemId = request.Value<long?>("system_id");
             var systemName = request.Value<string>("system_name");
+            var roleParameter = request.Value<string>("piping_role_parameter_guid");
+            Guid roleParameterId = Guid.Empty;
+            if (roleParameter != null && (!Guid.TryParse(roleParameter, out roleParameterId) || roleParameterId == Guid.Empty))
+                return CommandResult.Fail("piping_role_parameter_guid must be a nonzero GUID.");
 
             if (systemId == null && string.IsNullOrWhiteSpace(systemName))
                 return CommandResult.Fail("Either system_id or system_name is required.");
@@ -105,6 +110,8 @@ namespace RvtMcp.Plugin.Handlers
 
             string resolvedName = null;
             try { resolvedName = system.Name; } catch { }
+            if (roleParameter != null && !(system is PipingSystem))
+                return CommandResult.Fail("The piping role audit requires a piping system.");
 
             // System type name.
             string systemType = null;
@@ -132,6 +139,12 @@ namespace RvtMcp.Plugin.Handlers
             int openConnectorCount = 0;
 
             var members = snapshot.FlowElements;
+            JObject roleAudit = null;
+            if (roleParameter != null)
+            {
+                try { roleAudit = PipingRoleAudit.Read(members.OfType<Pipe>(), roleParameterId); }
+                catch (Exception ex) { return CommandResult.Fail("Failed to read piping roles: " + ex.Message); }
+            }
 
             if (members != null)
             {
@@ -212,10 +225,21 @@ namespace RvtMcp.Plugin.Handlers
                     "This system is empty — assign elements to it or delete it if it is unused.");
             }
 
+            if (roleAudit != null)
+            {
+                var mismatches = roleAudit.Value<int>("mismatch_count");
+                var unverified = roleAudit.Value<int>("unverified_count");
+                if (mismatches > 0 || unverified > 0)
+                {
+                    issues.Add("Piping role audit: " + mismatches + " mismatch(es), " + unverified + " unverified pipe(s).");
+                    recommendations.Add("Review the project role and Revit system type on the listed pipe IDs.");
+                }
+            }
+
             if (issues.Count == 0)
                 recommendations.Add("No topology issues detected — the system network is healthy.");
 
-            return CommandResult.Ok(new
+            var result = new
             {
                 system_id = RevitCompat.GetId(system.Id).ToString(),
                 system_name = resolvedName ?? string.Empty,
@@ -231,7 +255,11 @@ namespace RvtMcp.Plugin.Handlers
                 open_connector_count = openConnectorCount,
                 issues = issues.ToArray(),
                 recommendations = recommendations.ToArray()
-            });
+            };
+            if (roleAudit == null) return CommandResult.Ok(result);
+            var output = JObject.FromObject(result);
+            output["piping_role_audit"] = roleAudit;
+            return CommandResult.Ok(output);
         }
 
         /// <summary>Enumerates every MEP system in the document across all three domains.</summary>

@@ -16,12 +16,17 @@ Revit Home is supported after explicitly selecting the host. Read-only/send-code
 | `result_contract` | `"legacy"` | `"task_v1"` requires the add-in's actual `McpTaskResult` type |
 | `usage_context` | `"unknown"` | Declare `"project"` or `"test"`; no inference from source text |
 | `timeout_seconds` | 60 | Revit wait budget in whole seconds (1–900) |
+| `request_id` | `null` | New nonzero UUID in 32-hex form to protect one submission against replay |
 
 Omitted/null data, no modules and default script modes preserve the legacy code-only request.
 The timeout is sent in the transport envelope and does not require enhanced script capability.
 If the client has its own 60-second deadline, use a shorter budget such as 20 seconds, leaving room for connection setup and the gateway's five-second grace period.
 Use the receipt's `_operation.operationId` with `revit_get_operation_status` to inspect the original request.
 A wait budget does not cancel a script that has already started.
+
+Generate and keep a `request_id` before sending a script that creates or modifies elements. With this option, the ID is also the operation ID. The gateway reserves it locally before any wire write. A second submission with that ID returns `REVIT_REQUEST_ALREADY_SUBMITTED` across concurrent calls and gateway restarts. The same ID cannot be reused with edited code or after a failed connection. Query `revit_get_operation_status` with the original ID to recover the outcome.
+
+`submission_unconfirmed` means the ID was reserved and a native outcome has yet to be observed. Only issue a new ID after confirming that a new submission is required. Reservations contain no script contents, live in the local gateway profile and survive ordinary restarts. This protects repeats using the same ID and profile.
 With data, body scripts receive `JObject data`. Complete source uses exactly
 `public static object Run(UIApplication app, JObject data)` on `public class McpDynamicScript`;
 include `using Autodesk.Revit.UI; using Newtonsoft.Json.Linq;` in complete source.

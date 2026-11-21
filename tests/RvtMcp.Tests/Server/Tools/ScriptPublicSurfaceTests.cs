@@ -34,7 +34,7 @@ namespace RvtMcp.Tests
             var tool = Program.CreateRegisteredTools(ToolsetFilter.Resolve(new RvtMcpConfig()), new RvtMcpConfig())
                 .Single(t => t.ProtocolTool.Name == "revit_send_code_to_revit").ProtocolTool;
             var schema = JObject.Parse(tool.InputSchema.GetRawText());
-            Assert.Equal(new[] {"code", "data", "modules", "compile_only", "result_contract", "usage_context", "timeout_seconds"}, ((JObject)schema["properties"]).Properties().Select(p => p.Name));
+            Assert.Equal(new[] {"code", "data", "modules", "compile_only", "result_contract", "usage_context", "timeout_seconds", "request_id"}, ((JObject)schema["properties"]).Properties().Select(p => p.Name));
             Assert.Equal(new[] {"code"}, ((JArray)schema["required"]).Values<string>());
             var dataType = schema["properties"]["data"]["type"];
             Assert.Contains("object", dataType is JArray types ? types.Values<string>() : new[] {dataType.Value<string>()});

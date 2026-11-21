@@ -127,6 +127,14 @@
               "null"
             ]
           },
+          "request_id": {
+            "default": null,
+            "description": "A new UUID in 32-hex form for one submission. Keep it after timeout; reuse is detected without dispatching again.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "result_contract": {
             "default": "legacy",
             "enum": [

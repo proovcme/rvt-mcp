@@ -86,7 +86,8 @@ namespace RvtMcp.Server
                 {
                     var input = SendCodeCore.ReadArguments(arguments);
                     if (input.RequiresCapability) scriptLog = SendCodeCore.SafeLogArguments(input);
-                    result = ScriptResult(await SendCodeCore.SendAsync(input, timeoutSeconds: SendCodeCore.ReadTimeoutSeconds(arguments)));
+                    result = ScriptResult(await SendCodeCore.SendAsync(input, timeoutSeconds: SendCodeCore.ReadTimeoutSeconds(arguments),
+                        requestId: SendCodeCore.ReadRequestId(arguments)));
                 }
                 catch (ScriptContractException ex)
                 {

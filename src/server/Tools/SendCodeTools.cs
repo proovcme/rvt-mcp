@@ -19,11 +19,12 @@ namespace RvtMcp.Server
             "Inspect _task/_operation before retry. Large output auto-spills to a local same-machine file.")]
         public static async Task<string> SendCodeToRevit(string code, Dictionary<string, JsonElement>? data = null,
             string[]? modules = null, bool compile_only = false, string result_contract = "legacy", string usage_context = "unknown",
-            [Description("Revit wait in seconds, 1-900 (default 60). After a timeout, query the returned operation ID before retrying.")] int? timeout_seconds = null)
+            [Description("Revit wait in seconds, 1-900 (default 60). After a timeout, query the returned operation ID before retrying.")] int? timeout_seconds = null,
+            [Description("A new UUID in 32-hex form for one submission. Keep it after timeout; reuse is detected without dispatching again.")] string? request_id = null)
         {
             try { return await SendCodeCore.SendAsync(new RvtMcp.Scripting.ScriptInput(code,
                 RvtMcp.Scripting.ScriptData.FromJson(data == null ? null : JsonSerializer.Serialize(data)), modules, compile_only, result_contract, usage_context),
-                timeoutSeconds: timeout_seconds); }
+                timeoutSeconds: timeout_seconds, requestId: request_id); }
             catch (RvtMcp.Scripting.ScriptContractException ex) { return "Error: " + ex.ErrorCode + ": " + ex.Message; }
         }
     }

@@ -223,6 +223,10 @@
       "description_hash": "sha256:80b73ac94040560fbf667dd30ec1c4cae2a876b5da62ee7fbd40df19c946dbcc",
       "inputSchema": {
         "properties": {
+          "pipingRoleParameterGuid": {
+            "description": "Shared text parameter GUID for the expected piping role. Compare it with the native pipe system type abbreviation.",
+            "type": "String"
+          },
           "systemId": {
             "description": "",
             "type": "Nullable`1"
@@ -7194,6 +7198,10 @@
           "modules": {
             "description": "",
             "type": "String[]"
+          },
+          "request_id": {
+            "description": "A new UUID in 32-hex form for one submission. Keep it after timeout; reuse is detected without dispatching again.",
+            "type": "String"
           },
           "result_contract": {
             "description": "",

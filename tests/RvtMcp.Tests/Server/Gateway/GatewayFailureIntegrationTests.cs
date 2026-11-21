@@ -956,6 +956,52 @@ namespace RvtMcp.Tests
         }
 
         [Fact]
+        public async Task Script_request_id_blocks_in_flight_and_post_restart_submission()
+        {
+            using var wire = new WireHost();
+            Descriptor(wire.Port);
+            var arrived = new TaskCompletionSource<JObject>(TaskCreationOptions.RunContinuationsAsynchronously);
+            wire.OnCommand = (request, _) => arrived.TrySetResult(request);
+            var id = Guid.NewGuid().ToString("N");
+            var args = new Dictionary<string, object> { ["code"] = "return 7;", ["request_id"] = id };
+            await WithMcp(async (client, ct) =>
+            {
+                var first = client.CallToolAsync("revit_send_code_to_revit", args, cancellationToken: ct).AsTask();
+                var request = await arrived.Task.WaitAsync(TimeSpan.FromSeconds(8), ct);
+                Assert.Equal(id, request.Value<string>("operation_id"));
+                var unconfirmed = JObject.Parse(await FailureTools.GetOperationStatus(id));
+                Assert.Equal("submission_unconfirmed", unconfirmed["execution"]);
+
+                var repeat = Text(await client.CallToolAsync("revit_send_code_to_revit", args, cancellationToken: ct));
+                Assert.Equal("REVIT_REQUEST_ALREADY_SUBMITTED", repeat["error"]);
+                Assert.Equal(id, repeat["_operation"]["operationId"]);
+                Assert.Single(wire.Requests);
+
+                wire.Send(Final(request));
+                Assert.Equal("Test View", Text(await first)["viewName"]);
+                var completed = JObject.Parse(await FailureTools.GetOperationStatus(id));
+                Assert.Equal("completed", completed["execution"]);
+
+                ToolGateway.PreviousOperations.Clear();
+                args["request_id"] = id.ToUpperInvariant();
+                args["code"] = "return 8;";
+                repeat = Text(await client.CallToolAsync("revit_send_code_to_revit", args, cancellationToken: ct));
+                Assert.Equal("REVIT_REQUEST_ALREADY_SUBMITTED", repeat["error"]);
+                Assert.Equal(id, repeat["_operation"]["operationId"]);
+                Assert.Single(wire.Requests);
+            });
+        }
+
+        [Fact]
+        public async Task Script_request_id_is_reserved_by_at_most_one_concurrent_submitter()
+        {
+            var id = Guid.NewGuid().ToString("N");
+            var claims = await Task.WhenAll(Enumerable.Range(0, 12)
+                .Select(_ => Task.Run(() => ScriptSubmissionStore.TryReserve(id))));
+            Assert.Single(claims, reserved => reserved);
+        }
+
+        [Fact]
         public async Task Script_timeout_returns_an_operation_id_and_status_does_not_resend_the_script()
         {
             using var wire = new WireHost();

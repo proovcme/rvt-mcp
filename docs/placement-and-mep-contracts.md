@@ -48,6 +48,8 @@ Connection verification accepts a direct connection or two distinct physical por
 - An empty/delete recommendation requires no network members, no terminals, and no base equipment. Failed membership reads are errors, not empty systems.
 - Open-connector analysis counts physical End connectors in the system's domain. Electrical ports on HVAC equipment do not inflate the HVAC count.
 
+For piping, pass `pipingRoleParameterGuid` to `revit_analyze_mep_network` to compare a shared text parameter with the Revit system type abbreviation on each rigid pipe in the system's membership. Use the GUID of the project's designated role parameter. The `piping_role_audit` result reports matched, mismatched and unverified counts and up to 100 findings with element IDs. Check both the connector result and this audit after changing a supply or return branch. The model's referenced project-role values and system assignments are read from the current document.
+
 ## Evidence and limits
 
 Revit 2022/2024/2027 builds passed at the v0.6.2 acceptance checkpoint; live acceptance was on Revit 2027. The reporters' Revit 2025/2026 environments were not tested. Build coverage does not establish runtime acceptance on those versions. See the [automated test guide](../tests/RvtMcp.Tests/README.md) for reproducible unit coverage.

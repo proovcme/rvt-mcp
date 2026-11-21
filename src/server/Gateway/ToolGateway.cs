@@ -43,11 +43,27 @@ namespace RvtMcp.Server
         internal static Func<string, object, int?, Task<JObject>> SendOverride;
 
         public static async Task<JObject> SendToRevit(string command, object parameters = null, int? timeoutSeconds = null, bool requireWriteCapabilities = false,
-            ScriptRuntimeMetadata script = null)
+            ScriptRuntimeMetadata script = null, Guid? scriptRequestId = null)
         {
             var config = ServerState.Config ?? new RvtMcpConfig();
             var rejection = ToolReadPolicy.Rejection(command, config.ReadOnlyOrDefault, config.EnableSendCodeOrDefault);
             if (rejection != null) throw new InvalidOperationException(rejection);
+            var operationId = (scriptRequestId ?? Guid.NewGuid()).ToString("N");
+            if (scriptRequestId.HasValue)
+            {
+                if (command != "send_code_to_revit") throw new ArgumentException("A script request ID is only valid for send_code_to_revit.");
+                try
+                {
+                    if (!ScriptSubmissionStore.TryReserve(operationId))
+                        return ScriptSubmissionResult(operationId, "REVIT_REQUEST_ALREADY_SUBMITTED",
+                            "Query revit_get_operation_status for the original operation. This call was not dispatched.");
+                }
+                catch (Exception ex) when (ex is System.IO.IOException || ex is UnauthorizedAccessException)
+                {
+                    return ScriptSubmissionResult(operationId, "REVIT_REQUEST_RESERVATION_FAILED",
+                        "The request could not be reserved. This call was not dispatched.");
+                }
+            }
             var sendOverride = SendOverride;
             if (sendOverride != null)
                 return await sendOverride(command, parameters, timeoutSeconds);
@@ -70,7 +86,6 @@ namespace RvtMcp.Server
             }
 
             var id = $"req-{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}-{Guid.NewGuid().ToString("N").Substring(0, 6)}";
-            var operationId = Guid.NewGuid().ToString("N");
             var history = config.EnableChangeHistoryOrDefault ? new ChangeHistoryRequest { Id = operationId, Session = HistorySession } : null;
             var binding = RevitTargetBinding.Binding;
 
@@ -121,8 +136,13 @@ namespace RvtMcp.Server
             var result = InterpretResponse(response);
             // Finished pending operations are attached by RuntimeToolFilter, to the response the agent receives.
             var execution = (response["_operation"] as JObject)?.Value<string>("execution");
-            if (execution == "waiting_for_user" || execution == "timed_out_running" || execution == "running" || execution == "queued")
-                PreviousOperations.Remember(pending.OperationId, "revit_" + command, pending.Execution.Task, execution, ToolReadPolicy.IsReadOnly(command), pending);
+            var unfinished = execution == "waiting_for_user" || execution == "timed_out_running" || execution == "running" || execution == "queued";
+            if (unfinished || scriptRequestId.HasValue)
+            {
+                PreviousOperations.Remember(pending.OperationId, "revit_" + command, pending.Execution.Task,
+                    execution ?? "running", ToolReadPolicy.IsReadOnly(command), pending);
+                if (!unfinished) PreviousOperations.MarkRead(pending.OperationId);
+            }
             return result;
         }
 
@@ -156,15 +176,24 @@ namespace RvtMcp.Server
         /// and surface any failure to the agent as "Error: ..." text instead of throwing.
         /// Shells that parse or validate input must do it inside their own try, not in the arguments here.
         /// </summary>
-        internal static async Task<string> CallAsync(string command, object parameters = null, int? timeoutSeconds = null)
+        internal static async Task<string> CallAsync(string command, object parameters = null, int? timeoutSeconds = null, Guid? scriptRequestId = null)
         {
             try
             {
-                var result = await SendToRevit(command, parameters, timeoutSeconds);
+                var result = await SendToRevit(command, parameters, timeoutSeconds, scriptRequestId: scriptRequestId);
                 return JsonConvert.SerializeObject(result, Formatting.Indented);
             }
             catch (Exception ex) { return $"Error: {ex.Message}"; }
         }
+
+        private static JObject ScriptSubmissionResult(string operationId, string error, string note) => new JObject
+        {
+            ["success"] = false,
+            ["error"] = error,
+            ["message"] = note,
+            ["_operation"] = new JObject { ["operationId"] = operationId, ["execution"] = "submission_unconfirmed",
+                ["outcome"] = "unknown", ["complete"] = false, ["mutationApplied"] = JValue.CreateNull(), ["nextStep"] = note }
+        };
 
         /// <summary>
         /// <see cref="CallAsync"/> for shells that parse or normalize input: the parameters are built

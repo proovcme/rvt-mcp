@@ -14,7 +14,7 @@ namespace RvtMcp.Server
 {
     internal static class SendCodeCore
     {
-        internal static readonly string[] EnhancedArguments = { "data", "modules", "compile_only", "result_contract", "usage_context", "timeout_seconds" };
+        internal static readonly string[] EnhancedArguments = { "data", "modules", "compile_only", "result_contract", "usage_context", "timeout_seconds", "request_id" };
         internal const int DefaultTimeoutSeconds = 60;
         internal static Func<BakeDb> StoreFactory = () => new BakeDb(new BakePaths());
 
@@ -74,11 +74,26 @@ namespace RvtMcp.Server
             throw new ScriptContractException(ScriptErrorCodes.InputInvalid, "timeout_seconds must be an integer number of seconds.");
         }
 
-        internal static async Task<string> SendAsync(ScriptInput input, IReadOnlyList<ScriptModuleRevision> modules = null, int? timeoutSeconds = null)
+        internal static string ReadRequestId(IDictionary<string, JsonElement> args)
+        {
+            if (!args.TryGetValue("request_id", out var value) || value.ValueKind == JsonValueKind.Null) return null;
+            if (value.ValueKind == JsonValueKind.String) return value.GetString();
+            throw new ScriptContractException(ScriptErrorCodes.InputInvalid, "request_id must be a UUID string in 32-hex form.");
+        }
+
+        internal static async Task<string> SendAsync(ScriptInput input, IReadOnlyList<ScriptModuleRevision> modules = null, int? timeoutSeconds = null,
+            string requestId = null)
         {
             if (timeoutSeconds is int seconds && ToolGateway.ValidateTimeoutSeconds(seconds, DefaultTimeoutSeconds) is string invalid)
                 return invalid;
-            if (!input.RequiresCapability) return await ToolGateway.CallAsync("send_code_to_revit", new { code = input.Code }, timeoutSeconds);
+            Guid? scriptRequestId = null;
+            if (requestId != null)
+            {
+                if (requestId.Length != 32 || !Guid.TryParseExact(requestId, "N", out var parsed) || parsed == Guid.Empty)
+                    return "Error: " + ScriptErrorCodes.InputInvalid + ": request_id must be a nonzero UUID in 32-hex form.";
+                scriptRequestId = parsed;
+            }
+            if (!input.RequiresCapability) return await ToolGateway.CallAsync("send_code_to_revit", new { code = input.Code }, timeoutSeconds, scriptRequestId);
             try
             {
                 if (modules == null && input.Modules.Count != 0)
@@ -86,7 +101,7 @@ namespace RvtMcp.Server
                     using var db = StoreFactory();
                     modules = new CodeModuleStore(db).Resolve(input.Modules).Modules;
                 }
-                var result = await SendResolvedAsync(input, modules, metadata: null, timeoutSeconds);
+                var result = await SendResolvedAsync(input, modules, metadata: null, timeoutSeconds, scriptRequestId);
                 return result.ToString(Formatting.Indented);
             }
             catch (ScriptContractException ex) { return "Error: " + ex.ErrorCode + ": " + ex.Message; }
@@ -94,12 +109,14 @@ namespace RvtMcp.Server
         }
 
         internal static Task<JObject> SendResolvedAsync(ScriptInput input, IReadOnlyList<ScriptModuleRevision> modules, ScriptRuntimeMetadata metadata = null)
-            => SendResolvedAsync(input, modules, metadata, timeoutSeconds: null);
+            => SendResolvedAsync(input, modules, metadata, timeoutSeconds: null, scriptRequestId: null);
 
-        private static Task<JObject> SendResolvedAsync(ScriptInput input, IReadOnlyList<ScriptModuleRevision> modules, ScriptRuntimeMetadata metadata, int? timeoutSeconds)
+        private static Task<JObject> SendResolvedAsync(ScriptInput input, IReadOnlyList<ScriptModuleRevision> modules, ScriptRuntimeMetadata metadata,
+            int? timeoutSeconds, Guid? scriptRequestId)
         {
             var request = new ScriptWireRequest(input, modules);
-            return ToolGateway.SendToRevit("send_code_to_revit", request.Parameters(), timeoutSeconds, script: metadata ?? request.Metadata());
+            return ToolGateway.SendToRevit("send_code_to_revit", request.Parameters(), timeoutSeconds,
+                script: metadata ?? request.Metadata(), scriptRequestId: scriptRequestId);
         }
 
         internal static string SafeLogArguments(ScriptInput input)

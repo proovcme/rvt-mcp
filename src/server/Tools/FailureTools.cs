@@ -127,18 +127,26 @@ namespace RvtMcp.Server
         {
             if (status.Value<bool?>("available") != true) return false;
             var execution = status.Value<string>("execution");
-            return execution == "waiting_for_user" || execution == "timed_out_running" || execution == "running" || execution == "queued";
+            return execution == "waiting_for_user" || execution == "timed_out_running" || execution == "running" || execution == "queued"
+                || execution == "submission_unconfirmed";
         }
 
         private static JObject ReadStatus(string operationId)
         {
+            if (Guid.TryParseExact(operationId, "N", out var guid)) operationId = guid.ToString("N");
             var operation = StoreFactory().GetOperation(operationId);
             if (operation == null)
-                // Reads have no durable record; this session may still hold the request.
-                return ToolGateway.PreviousOperations.Status(operationId) is JObject session
-                    ? MarkReadIfCompleted(operationId, session)
-                    : new JObject { ["available"] = false, ["operationId"] = operationId,
-                        ["complete"] = false, ["note"] = "No durable operation record is available. Do not infer that execution failed or retry unchanged." };
+            {
+                // Reads have no durable native record. A keyed script may have only its submission reservation so far.
+                if (ToolGateway.PreviousOperations.Status(operationId) is JObject session)
+                    return MarkReadIfCompleted(operationId, session);
+                if (ScriptSubmissionStore.IsReserved(operationId))
+                    return new JObject { ["available"] = true, ["operationId"] = operationId, ["source"] = "gateway_reservation",
+                        ["execution"] = "submission_unconfirmed", ["outcome"] = "unknown", ["complete"] = false,
+                        ["note"] = "The submission ID was reserved before dispatch. Model execution has not been confirmed." };
+                return new JObject { ["available"] = false, ["operationId"] = operationId,
+                    ["complete"] = false, ["note"] = "No durable operation record is available. Do not infer that execution failed or retry unchanged." };
+            }
             var result = JObject.Parse(FailureJson.Serialize(operation));
             if (result["finalResult"] is JObject final)
             {

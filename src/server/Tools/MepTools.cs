@@ -73,7 +73,15 @@ namespace RvtMcp.Server
             => await ToolGateway.CallAsync("find_mep_disconnects", new { domain_filter = domainFilter, view_only = viewOnly, limit });
 
         [McpServerTool(Name = "revit_analyze_mep_network", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), System.ComponentModel.Description("Analyze one MEP system. For piping and HVAC, element_count, category_breakdown, and open_connector_count come from the pipe or duct network; terminal_count excludes base equipment. Empty-system advice requires both counts zero and no base equipment. Membership read failures return an error. Electrical element_count is the circuit members. Identify by systemId or systemName.")]
-        public static async Task<string> AnalyzeMepNetwork(long? systemId = null, string systemName = "")
-            => await ToolGateway.CallAsync("analyze_mep_network", new { system_id = systemId, system_name = systemName });
+        public static async Task<string> AnalyzeMepNetwork(long? systemId = null, string systemName = "",
+            [System.ComponentModel.Description("Shared text parameter GUID for the expected piping role. Compare it with the native pipe system type abbreviation.")] string pipingRoleParameterGuid = null)
+        {
+            if (pipingRoleParameterGuid == null)
+                return await ToolGateway.CallAsync("analyze_mep_network", new { system_id = systemId, system_name = systemName });
+            if (!System.Guid.TryParse(pipingRoleParameterGuid, out var guid) || guid == System.Guid.Empty)
+                return "Error: pipingRoleParameterGuid must be a nonzero GUID.";
+            return await ToolGateway.CallAsync("analyze_mep_network",
+                new { system_id = systemId, system_name = systemName, piping_role_parameter_guid = guid.ToString("D") });
+        }
     }
 }

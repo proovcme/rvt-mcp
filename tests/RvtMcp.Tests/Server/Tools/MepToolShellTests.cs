@@ -215,6 +215,16 @@ namespace RvtMcp.Tests
             var json = sent.Json();
             Assert.Null(json["system_id"]);
             Assert.Equal("Sys1", json.Value<string>("system_name"));
+            Assert.Null(json["piping_role_parameter_guid"]);
+        }
+
+        [Fact]
+        public async Task Analyze_mep_network_sends_the_optional_role_parameter_guid()
+        {
+            var guid = System.Guid.NewGuid();
+            var sent = await Capture.Send(() => MepTools.AnalyzeMepNetwork(10, pipingRoleParameterGuid: guid.ToString("N")));
+            Assert.Equal("analyze_mep_network", sent.Command);
+            Assert.Equal(guid.ToString("D"), sent.Json().Value<string>("piping_role_parameter_guid"));
         }
     }
 }
