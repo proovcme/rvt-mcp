@@ -29,12 +29,12 @@ namespace RvtMcp.Tests
         }
 
         [Fact]
-        public void Actual_SDK_schema_has_all_six_parameters_and_only_code_is_required()
+        public void Actual_SDK_schema_includes_timeout_and_only_code_is_required()
         {
             var tool = Program.CreateRegisteredTools(ToolsetFilter.Resolve(new RvtMcpConfig()), new RvtMcpConfig())
                 .Single(t => t.ProtocolTool.Name == "revit_send_code_to_revit").ProtocolTool;
             var schema = JObject.Parse(tool.InputSchema.GetRawText());
-            Assert.Equal(new[] {"code", "data", "modules", "compile_only", "result_contract", "usage_context"}, ((JObject)schema["properties"]).Properties().Select(p => p.Name));
+            Assert.Equal(new[] {"code", "data", "modules", "compile_only", "result_contract", "usage_context", "timeout_seconds"}, ((JObject)schema["properties"]).Properties().Select(p => p.Name));
             Assert.Equal(new[] {"code"}, ((JArray)schema["required"]).Values<string>());
             var dataType = schema["properties"]["data"]["type"];
             Assert.Contains("object", dataType is JArray types ? types.Values<string>() : new[] {dataType.Value<string>()});
@@ -70,16 +70,25 @@ namespace RvtMcp.Tests
         public async Task Default_arguments_keep_legacy_wire_while_direct_data_preserves_large_numbers()
         {
             var original = ToolGateway.SendOverride; var calls = new List<JObject>();
-            ToolGateway.SendOverride = (_, args, __) => { calls.Add(JObject.FromObject(args)); return Task.FromResult(new JObject { ["ok"] = true }); };
+            var timeouts = new List<int?>();
+            ToolGateway.SendOverride = (_, args, timeout) =>
+            {
+                calls.Add(JObject.FromObject(args));
+                timeouts.Add(timeout);
+                return Task.FromResult(new JObject { ["ok"] = true });
+            };
             try
             {
                 await SendCodeTools.SendCodeToRevit("return 7;");
                 await SendCodeTools.SendCodeToRevit("return 7;", modules: Array.Empty<string>());
                 Assert.All(calls, args => Assert.Equal(new[] {"code"}, args.Properties().Select(p => p.Name)));
+                Assert.All(timeouts, timeout => Assert.Null(timeout));
                 var data = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>("{\"n\":9007199254740993,\"secret\":\"private-script-input\"}");
-                await SendCodeTools.SendCodeToRevit("return data;", data, usage_context: "test");
+                await SendCodeTools.SendCodeToRevit("return data;", data, usage_context: "test", timeout_seconds: 20);
                 Assert.Contains("9007199254740993", calls.Last().Value<string>("data_json"));
                 Assert.Equal("test", calls.Last().Value<string>("usage_context"));
+                Assert.Null(calls.Last()["timeout_seconds"]);
+                Assert.Equal(20, timeouts.Last());
             }
             finally { ToolGateway.SendOverride = original; }
         }

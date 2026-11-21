@@ -14,7 +14,8 @@ namespace RvtMcp.Server
 {
     internal static class SendCodeCore
     {
-        internal static readonly string[] EnhancedArguments = { "data", "modules", "compile_only", "result_contract", "usage_context" };
+        internal static readonly string[] EnhancedArguments = { "data", "modules", "compile_only", "result_contract", "usage_context", "timeout_seconds" };
+        internal const int DefaultTimeoutSeconds = 60;
         internal static Func<BakeDb> StoreFactory = () => new BakeDb(new BakePaths());
 
         internal static void ValidateOriginalRequest(JsonNode parameters)
@@ -66,9 +67,18 @@ namespace RvtMcp.Server
             return new ScriptInput(Text("code"), data, roots, compileOnly, Text("result_contract", ScriptModes.Legacy), Text("usage_context", ScriptModes.Unknown));
         }
 
-        internal static async Task<string> SendAsync(ScriptInput input, IReadOnlyList<ScriptModuleRevision> modules = null)
+        internal static int? ReadTimeoutSeconds(IDictionary<string, JsonElement> args)
         {
-            if (!input.RequiresCapability) return await ToolGateway.CallAsync("send_code_to_revit", new { code = input.Code });
+            if (!args.TryGetValue("timeout_seconds", out var value) || value.ValueKind == JsonValueKind.Null) return null;
+            if (value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out int seconds)) return seconds;
+            throw new ScriptContractException(ScriptErrorCodes.InputInvalid, "timeout_seconds must be an integer number of seconds.");
+        }
+
+        internal static async Task<string> SendAsync(ScriptInput input, IReadOnlyList<ScriptModuleRevision> modules = null, int? timeoutSeconds = null)
+        {
+            if (timeoutSeconds is int seconds && ToolGateway.ValidateTimeoutSeconds(seconds, DefaultTimeoutSeconds) is string invalid)
+                return invalid;
+            if (!input.RequiresCapability) return await ToolGateway.CallAsync("send_code_to_revit", new { code = input.Code }, timeoutSeconds);
             try
             {
                 if (modules == null && input.Modules.Count != 0)
@@ -76,7 +86,7 @@ namespace RvtMcp.Server
                     using var db = StoreFactory();
                     modules = new CodeModuleStore(db).Resolve(input.Modules).Modules;
                 }
-                var result = await SendResolvedAsync(input, modules);
+                var result = await SendResolvedAsync(input, modules, metadata: null, timeoutSeconds);
                 return result.ToString(Formatting.Indented);
             }
             catch (ScriptContractException ex) { return "Error: " + ex.ErrorCode + ": " + ex.Message; }
@@ -84,9 +94,12 @@ namespace RvtMcp.Server
         }
 
         internal static Task<JObject> SendResolvedAsync(ScriptInput input, IReadOnlyList<ScriptModuleRevision> modules, ScriptRuntimeMetadata metadata = null)
+            => SendResolvedAsync(input, modules, metadata, timeoutSeconds: null);
+
+        private static Task<JObject> SendResolvedAsync(ScriptInput input, IReadOnlyList<ScriptModuleRevision> modules, ScriptRuntimeMetadata metadata, int? timeoutSeconds)
         {
             var request = new ScriptWireRequest(input, modules);
-            return ToolGateway.SendToRevit("send_code_to_revit", request.Parameters(), script: metadata ?? request.Metadata());
+            return ToolGateway.SendToRevit("send_code_to_revit", request.Parameters(), timeoutSeconds, script: metadata ?? request.Metadata());
         }
 
         internal static string SafeLogArguments(ScriptInput input)

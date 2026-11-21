@@ -15,8 +15,13 @@ Revit Home is supported after explicitly selecting the host. Read-only/send-code
 | `compile_only` | `false` | Compile/emit without loading or invoking user code |
 | `result_contract` | `"legacy"` | `"task_v1"` requires the add-in's actual `McpTaskResult` type |
 | `usage_context` | `"unknown"` | Declare `"project"` or `"test"`; no inference from source text |
+| `timeout_seconds` | 60 | Revit wait budget in whole seconds (1–900) |
 
-Omitted/null data, no modules and all other defaults preserve the legacy code-only request.
+Omitted/null data, no modules and default script modes preserve the legacy code-only request.
+The timeout is sent in the transport envelope and does not require enhanced script capability.
+If the client has its own 60-second deadline, use a shorter budget such as 20 seconds, leaving room for connection setup and the gateway's five-second grace period.
+Use the receipt's `_operation.operationId` with `revit_get_operation_status` to inspect the original request.
+A wait budget does not cancel a script that has already started.
 With data, body scripts receive `JObject data`. Complete source uses exactly
 `public static object Run(UIApplication app, JObject data)` on `public class McpDynamicScript`;
 include `using Autodesk.Revit.UI; using Newtonsoft.Json.Linq;` in complete source.

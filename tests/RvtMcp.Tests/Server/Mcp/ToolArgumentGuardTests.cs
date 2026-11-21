@@ -110,6 +110,21 @@ namespace RvtMcp.Tests
             Assert.DoesNotContain("PRIVATE-SCRIPT-DATA", h.JournalText());
         }
 
+        [Theory]
+        [InlineData("0")]
+        [InlineData("901")]
+        [InlineData("5.5")]
+        [InlineData("\"20\"")]
+        public async Task Script_timeout_rejects_invalid_values_before_dispatch(string timeout)
+        {
+            await using var h = await Harness.StartAsync();
+            var result = await h.CallAsync("revit_send_code_to_revit",
+                "{\"code\":\"return 7;\",\"timeout_seconds\":" + timeout + "}");
+            Assert.True(result.IsError);
+            Assert.Contains("timeout_seconds", result.Text);
+            Assert.Empty(h.Dispatched);
+        }
+
         [Fact]
         public async Task V1_valid_call_dispatches_unchanged_without_warning()
         {

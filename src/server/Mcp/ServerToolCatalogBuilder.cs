@@ -27,6 +27,7 @@ namespace RvtMcp.Server
         {
             "load_family_from_path",
             "open_model",
+            "send_code_to_revit",
             "link_revit_model",
             "reload_link"
         };
@@ -154,7 +155,7 @@ namespace RvtMcp.Server
             {
                 return new TimeoutPolicy(
                     defaultSeconds: null,
-                    parameterDefaultSeconds: LongRunDefaultSeconds,
+                    parameterDefaultSeconds: command == "send_code_to_revit" ? SendCodeCore.DefaultTimeoutSeconds : LongRunDefaultSeconds,
                     parameterMinimumSeconds: LongRunMinimumSeconds,
                     parameterMaximumSeconds: LongRunMaximumSeconds,
                     transportGraceSeconds: TransportGraceSeconds,

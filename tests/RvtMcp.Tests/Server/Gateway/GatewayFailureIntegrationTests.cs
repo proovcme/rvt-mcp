@@ -956,6 +956,34 @@ namespace RvtMcp.Tests
         }
 
         [Fact]
+        public async Task Script_timeout_returns_an_operation_id_and_status_does_not_resend_the_script()
+        {
+            using var wire = new WireHost();
+            Descriptor(wire.Port);
+            wire.OnCommand = (_, _) => { }; // The host is still executing when the gateway wait budget expires.
+            await WithMcp(async (client, ct) =>
+            {
+                var reply = await client.CallToolAsync("revit_send_code_to_revit",
+                    new Dictionary<string, object> { ["code"] = "return 7;", ["timeout_seconds"] = 1 },
+                    cancellationToken: ct).AsTask().WaitAsync(TimeSpan.FromSeconds(12), ct);
+                var receipt = Text(reply);
+                var request = Assert.Single(wire.Requests);
+                Assert.Equal(1, request.Value<int>("timeout_seconds"));
+                Assert.Equal("timed_out_running", receipt["_operation"]["execution"]);
+                var operationId = receipt["_operation"].Value<string>("operationId");
+                Assert.Equal(request.Value<string>("operation_id"), operationId);
+
+                wire.Send(Final(request));
+                var status = await client.CallToolAsync("revit_get_operation_status",
+                    new Dictionary<string, object> { ["operationId"] = operationId, ["waitSeconds"] = 5 },
+                    cancellationToken: ct);
+                Assert.Equal("completed", Text(status)["execution"]);
+                Assert.Equal("Test View", Text(status)["finalResult"]["data"]["viewName"]);
+                Assert.Single(wire.Requests);
+            });
+        }
+
+        [Fact]
         public async Task Timed_out_read_has_session_status_and_a_status_wait_returns_when_it_finishes()
         {
             using var wire = new WireHost();

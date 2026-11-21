@@ -7289,6 +7289,10 @@
             "description": "",
             "type": "String"
           },
+          "timeout_seconds": {
+            "description": "Revit wait in seconds, 1-900 (default 60). After a timeout, query the returned operation ID before retrying.",
+            "type": "Nullable`1"
+          },
           "usage_context": {
             "description": "",
             "type": "String"

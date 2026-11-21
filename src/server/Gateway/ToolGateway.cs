@@ -296,10 +296,10 @@ namespace RvtMcp.Server
         /// Out-of-range values are rejected rather than clamped so a wrong unit
         /// (e.g. 600000 milliseconds) surfaces as an error instead of a silent cap.
         /// </summary>
-        internal static string ValidateTimeoutSeconds(int timeoutSeconds)
+        internal static string ValidateTimeoutSeconds(int timeoutSeconds, int defaultSeconds = 600)
         {
             if (timeoutSeconds < 1 || timeoutSeconds > 900)
-                return $"Error: timeout_seconds must be between 1 and 900 seconds (got {timeoutSeconds}). The default is 600 and the unit is seconds, not milliseconds.";
+                return $"Error: timeout_seconds must be between 1 and 900 seconds (got {timeoutSeconds}). The default is {defaultSeconds} and the unit is seconds, not milliseconds.";
             return null;
         }
     }

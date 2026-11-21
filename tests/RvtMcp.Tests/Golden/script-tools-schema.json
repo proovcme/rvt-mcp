@@ -135,6 +135,14 @@
             ],
             "type": "string"
           },
+          "timeout_seconds": {
+            "default": null,
+            "description": "Revit wait in seconds, 1-900 (default 60). After a timeout, query the returned operation ID before retrying.",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "usage_context": {
             "default": "unknown",
             "enum": [
